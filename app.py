@@ -1,7 +1,9 @@
 import streamlit as st
 import requests
 import base64
-from audio_recorder_streamlit import audio_recorder
+import io
+import wave
+from streamlit_audiorecorder import audiorecorder
 
 st.set_page_config(
     page_title="Aligner Coach | Dr. Ajay Kubavat",
@@ -21,6 +23,10 @@ LANGUAGES = {
     "Kashmiri": "ks-IN", "Manipuri": "mni-IN", "Nepali": "ne-IN",
     "Sanskrit": "sa-IN", "Santali": "sat-IN", "Sindhi": "sd-IN", "Urdu": "ur-IN"
 }
+
+# TTS only supports these 11 languages
+TTS_SUPPORTED = ["hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN",
+                 "od-IN", "pa-IN", "ta-IN", "te-IN", "en-IN", "gu-IN"]
 
 SYSTEM_PROMPT = """You are the Aligner Coach AI, created by Dr. Ajay Kubavat (MDS Orthodontics),
 Founder of Sure Align Orthodontix n Dentistry, Ahmedabad, Gujarat.
@@ -52,61 +58,88 @@ ALWAYS end every response with:
 'For any concerns, WhatsApp Dr. Ajay Kubavat: +916358822642'
 """
 
-# ---- Sarvam AI Functions ----
+
+def audio_segment_to_wav_bytes(audio_segment):
+    """Convert pydub AudioSegment to WAV bytes for Sarvam STT API."""
+    buf = io.BytesIO()
+    audio_segment.export(buf, format="wav")
+    buf.seek(0)
+    return buf.read()
+
+
 def stt(audio_bytes):
-    """Voice to Text using Sarvam Saarika v2"""
+    """Speech to Text using Sarvam Saarika v2.
+    audio_bytes must be a valid WAV file bytes.
+    """
+    if not SARVAM_API_KEY:
+        return ""
     try:
-        files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
+        # audio_bytes from streamlit_audiorecorder is already a valid WAV
+        buf = io.BytesIO(audio_bytes)
+        files = {
+            "file": ("recording.wav", buf, "audio/wav")
+        }
+        data = {
+            "model": "saarika:v2",
+            "language_code": "unknown"
+        }
         r = requests.post(
             "https://api.sarvam.ai/speech-to-text",
             headers={"api-subscription-key": SARVAM_API_KEY},
             files=files,
-            data={"model": "saarika:v2", "language_code": "unknown"},
+            data=data,
             timeout=30
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            st.error(f"STT Error {r.status_code}: {r.text[:200]}")
+            return ""
         return r.json().get("transcript", "")
     except Exception as e:
-        st.error(f"Voice transcription error: {e}")
+        st.error(f"STT exception: {e}")
         return ""
 
+
 def tts(text, lang_code):
-    """Text to Speech using Sarvam Bulbul v2"""
+    """Text to Speech using Sarvam Bulbul v2."""
+    if not SARVAM_API_KEY:
+        return None
     try:
-        # Trim text to 1500 chars max (bulbul:v2 limit)
-        text = text[:1500]
-        # Only supported language codes for bulbul:v2 TTS
-        supported_tts = ["hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN",
-                         "od-IN", "pa-IN", "ta-IN", "te-IN", "en-IN", "gu-IN"]
-        if lang_code not in supported_tts:
-            lang_code = "en-IN"
+        # Use English fallback for unsupported TTS languages
+        tts_lang = lang_code if lang_code in TTS_SUPPORTED else "en-IN"
+        # Trim to bulbul:v2 limit
+        text_trimmed = text[:1500]
+        payload = {
+            "text": text_trimmed,
+            "target_language_code": tts_lang,
+            "speaker": "anushka",
+            "model": "bulbul:v2",
+            "enable_preprocessing": True
+        }
         r = requests.post(
             "https://api.sarvam.ai/text-to-speech",
             headers={
                 "api-subscription-key": SARVAM_API_KEY,
                 "Content-Type": "application/json"
             },
-            json={
-                "text": text,
-                "target_language_code": lang_code,
-                "speaker": "anushka",
-                "model": "bulbul:v2",
-                "enable_preprocessing": True
-            },
+            json=payload,
             timeout=30
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            st.warning(f"TTS Error {r.status_code}: {r.text[:200]}")
+            return None
         audios = r.json().get("audios", [])
         if audios:
             return base64.b64decode(audios[0])
         return None
     except Exception as e:
-        st.warning(f"Audio generation note: {e}")
+        st.warning(f"TTS exception: {e}")
         return None
 
+
 def chat(user_msg, history):
+    """Chat with Sarvam-M model."""
     if not SARVAM_API_KEY:
-        return "API key not configured."
+        return "API key not configured. Please set SARVAM_API_KEY in Streamlit secrets."
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     for h in history[-6:]:
         msgs.append({"role": "user", "content": h["user"]})
@@ -115,14 +148,23 @@ def chat(user_msg, history):
     try:
         r = requests.post(
             "https://api.sarvam.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {SARVAM_API_KEY}", "Content-Type": "application/json"},
-            json={"model": "sarvam-m", "messages": msgs, "temperature": 0.7, "max_tokens": 512},
+            headers={
+                "Authorization": f"Bearer {SARVAM_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "sarvam-m",
+                "messages": msgs,
+                "temperature": 0.7,
+                "max_tokens": 512
+            },
             timeout=30
         )
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Chat error: {str(e)}"
+
 
 # ---- Sidebar ----
 with st.sidebar:
@@ -131,24 +173,31 @@ with st.sidebar:
     st.markdown("**Dr. Ajay Kubavat**")
     st.markdown("🎓 MDS Orthodontics | Ahmedabad")
     st.divider()
+
     lang = st.selectbox("🌐 Language / भाषा", list(LANGUAGES.keys()))
     lang_code = LANGUAGES[lang]
+
     st.divider()
     st.markdown("### 🎤 Voice Input")
-    st.caption("Click mic, speak your question, click again to stop")
-    recorded_audio = audio_recorder(
-        text="Click to Speak",
-        recording_color="#e8534f",
-        neutral_color="#00a2ff",
-        icon_size="2x"
+    st.caption("Press Start, speak your question, then press Stop")
+
+    audio = audiorecorder(
+        start_prompt="🎤 Start Recording",
+        stop_prompt="⏹️ Stop Recording",
+        pause_prompt="",
+        key="audiorecorder"
     )
+
     st.divider()
     st.markdown("🚨 **Emergency**")
     st.markdown("[WhatsApp Dr. Ajay](https://wa.me/916358822642)")
     st.divider()
+
     if st.button("🗑️ Clear Chat"):
         st.session_state.history = []
+        st.session_state["last_audio_hash"] = None
         st.rerun()
+
 
 # ---- Main ----
 st.title("🦷 Aligner Coach")
@@ -156,16 +205,27 @@ st.caption("Dr. Ajay Kubavat | Sure Align Orthodontix n Dentistry | Powered by S
 
 if "history" not in st.session_state:
     st.session_state.history = []
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
 
-# Process voice input from microphone
-if recorded_audio and len(recorded_audio) > 1000:
-    with st.spinner("🎧 Transcribing your voice..."):
-        v_text = stt(recorded_audio)
-    if v_text and v_text.strip():
-        st.session_state.v_input = v_text.strip()
-        st.toast(f"🎤 Heard: {v_text[:60]}")
+# ---- Process Voice Input ----
+if len(audio) > 0:
+    # Export to WAV bytes
+    wav_bytes = audio_segment_to_wav_bytes(audio)
+    audio_hash = hash(wav_bytes)
 
-# Display chat history
+    # Only process new recordings (avoid re-processing on rerun)
+    if audio_hash != st.session_state.last_audio_hash:
+        st.session_state.last_audio_hash = audio_hash
+        with st.spinner("🎧 Transcribing your voice..."):
+            transcript = stt(wav_bytes)
+        if transcript and transcript.strip():
+            st.session_state.v_input = transcript.strip()
+            st.toast(f"🎤 Heard: {transcript[:80]}")
+        else:
+            st.warning("🔇 Could not transcribe audio. Please try again clearly.")
+
+# ---- Display Chat History ----
 for m in st.session_state.history:
     with st.chat_message("user"):
         st.write(m["user"])
@@ -174,7 +234,7 @@ for m in st.session_state.history:
         if m.get("audio"):
             st.audio(m["audio"], format="audio/wav")
 
-# Get input - either typed or from voice
+# ---- Get Input (typed or voice) ----
 inp = st.chat_input(f"Ask in {lang}...")
 if st.session_state.get("v_input"):
     inp = st.session_state.pop("v_input")
@@ -187,12 +247,16 @@ if inp:
         rep = chat(inp, st.session_state.history)
 
     with st.spinner("🔊 Generating audio response..."):
-        audio_bytes = tts(rep, lang_code)
+        audio_bytes_out = tts(rep, lang_code)
 
     with st.chat_message("assistant", avatar="🦷"):
         st.write(rep)
-        if audio_bytes:
-            st.audio(audio_bytes, format="audio/wav")
+        if audio_bytes_out:
+            st.audio(audio_bytes_out, format="audio/wav")
 
-    st.session_state.history.append({"user": inp, "bot": rep, "audio": audio_bytes})
+    st.session_state.history.append({
+        "user": inp,
+        "bot": rep,
+        "audio": audio_bytes_out
+    })
     st.rerun()
