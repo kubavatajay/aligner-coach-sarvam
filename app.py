@@ -1,9 +1,7 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import requests
 import base64
 import io
-import json
 
 st.set_page_config(
     page_title="Aligner Coach | Dr. Ajay Kubavat",
@@ -56,69 +54,6 @@ Multiple attachments fallen off.
 Contact: Dr. Ajay Kubavat | WhatsApp: +916358822642
 Clinic: Sure Align Orthodontix n Dentistry, Ahmedabad
 ALWAYS end every response with: 'For any concerns, WhatsApp Dr. Ajay Kubavat: +916358822642'
-"""
-
-# ===== JavaScript Audio Recorder Component =====
-AUDIO_RECORDER_HTML = """
-<div style="font-family: sans-serif; text-align: center; padding: 8px;">
-  <button id="recBtn" onclick="toggleRecording()"
-    style="background:#FF4B4B; color:white; border:none; border-radius:8px;
-           padding:10px 20px; font-size:16px; cursor:pointer; width:100%;">
-    🎤 Start Speaking
-  </button>
-  <p id="status" style="color:#666; font-size:13px; margin:6px 0;">Click button to start recording</p>
-</div>
-
-<script>
-let mediaRecorder = null;
-let audioChunks = [];
-let isRecording = false;
-
-function toggleRecording() {
-  if (!isRecording) {
-    startRecording();
-  } else {
-    stopRecording();
-  }
-}
-
-async function startRecording() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64 = reader.result.split(',')[1];
-        window.parent.postMessage({ type: 'audio_data', data: base64 }, '*');
-        document.getElementById('status').textContent = 'Recording sent for transcription!';
-      };
-      reader.readAsDataURL(blob);
-      stream.getTracks().forEach(t => t.stop());
-    };
-    mediaRecorder.start();
-    isRecording = true;
-    document.getElementById('recBtn').textContent = '⏹️ Stop Recording';
-    document.getElementById('recBtn').style.background = '#00AA00';
-    document.getElementById('status').textContent = 'Recording... Click to stop';
-  } catch(err) {
-    document.getElementById('status').textContent = 'Mic error: ' + err.message;
-  }
-}
-
-function stopRecording() {
-  if (mediaRecorder && isRecording) {
-    mediaRecorder.stop();
-    isRecording = false;
-    document.getElementById('recBtn').textContent = '🎤 Start Speaking';
-    document.getElementById('recBtn').style.background = '#FF4B4B';
-    document.getElementById('status').textContent = 'Processing...';
-  }
-}
-</script>
 """
 
 
@@ -205,8 +140,10 @@ def chat(user_msg, history):
 # ======== SESSION STATE INIT ========
 if "history" not in st.session_state:
     st.session_state.history = []
-if "pending_input" not in st.session_state:
-    st.session_state.pending_input = None
+if "last_audio_hash" not in st.session_state:
+    st.session_state.last_audio_hash = None
+if "pending_voice_input" not in st.session_state:
+    st.session_state.pending_voice_input = None
 
 
 # ======== SIDEBAR ========
@@ -222,10 +159,23 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🎤 Voice Input")
-    st.caption("▶️ Click to start | ⏹️ Click again to stop")
+    st.caption("Record your voice - it will be auto-transcribed via Sarvam AI")
 
-    # Render the JS audio recorder
-    audio_b64 = components.html(AUDIO_RECORDER_HTML, height=100)
+    # st.audio_input: built-in Streamlit widget (>= 1.41), no extra packages
+    audio_input = st.audio_input("🎤 Click to record your question", key="voice_rec")
+
+    if audio_input is not None:
+        audio_bytes = audio_input.read()
+        audio_hash = hash(audio_bytes)
+        if audio_hash != st.session_state.last_audio_hash and len(audio_bytes) > 500:
+            st.session_state.last_audio_hash = audio_hash
+            with st.spinner("🎧 Transcribing..."):
+                transcript = stt(audio_bytes)
+            if transcript and transcript.strip():
+                st.session_state.pending_voice_input = transcript.strip()
+                st.success(f"🎤 Heard: {transcript[:80]}")
+            else:
+                st.warning("🔇 Could not transcribe. Please speak clearly.")
 
     st.divider()
     st.markdown("🚨 **Emergency**")
@@ -233,7 +183,8 @@ with st.sidebar:
     st.divider()
     if st.button("🗑️ Clear Chat"):
         st.session_state.history = []
-        st.session_state.pending_input = None
+        st.session_state.last_audio_hash = None
+        st.session_state.pending_voice_input = None
         st.rerun()
 
 
@@ -250,8 +201,12 @@ for m in st.session_state.history:
         if m.get("audio"):
             st.audio(m["audio"], format="audio/wav")
 
-# ---- Text input ----
-final_inp = st.chat_input(f"Ask in {lang}...")
+# ---- Determine final input (voice takes priority) ----
+text_inp = st.chat_input(f"Ask in {lang}...")
+final_inp = st.session_state.pending_voice_input or text_inp
+
+if st.session_state.pending_voice_input:
+    st.session_state.pending_voice_input = None
 
 if final_inp:
     with st.chat_message("user"):
