@@ -1,8 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import base64
 import io
-from streamlit_mic_recorder import mic_recorder
+import json
 
 st.set_page_config(
     page_title="Aligner Coach | Dr. Ajay Kubavat",
@@ -57,6 +58,69 @@ Clinic: Sure Align Orthodontix n Dentistry, Ahmedabad
 ALWAYS end every response with: 'For any concerns, WhatsApp Dr. Ajay Kubavat: +916358822642'
 """
 
+# ===== JavaScript Audio Recorder Component =====
+AUDIO_RECORDER_HTML = """
+<div style="font-family: sans-serif; text-align: center; padding: 8px;">
+  <button id="recBtn" onclick="toggleRecording()"
+    style="background:#FF4B4B; color:white; border:none; border-radius:8px;
+           padding:10px 20px; font-size:16px; cursor:pointer; width:100%;">
+    🎤 Start Speaking
+  </button>
+  <p id="status" style="color:#666; font-size:13px; margin:6px 0;">Click button to start recording</p>
+</div>
+
+<script>
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+function toggleRecording() {
+  if (!isRecording) {
+    startRecording();
+  } else {
+    stopRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.onstop = async () => {
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1];
+        window.parent.postMessage({ type: 'audio_data', data: base64 }, '*');
+        document.getElementById('status').textContent = 'Recording sent for transcription!';
+      };
+      reader.readAsDataURL(blob);
+      stream.getTracks().forEach(t => t.stop());
+    };
+    mediaRecorder.start();
+    isRecording = true;
+    document.getElementById('recBtn').textContent = '⏹️ Stop Recording';
+    document.getElementById('recBtn').style.background = '#00AA00';
+    document.getElementById('status').textContent = 'Recording... Click to stop';
+  } catch(err) {
+    document.getElementById('status').textContent = 'Mic error: ' + err.message;
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    isRecording = false;
+    document.getElementById('recBtn').textContent = '🎤 Start Speaking';
+    document.getElementById('recBtn').style.background = '#FF4B4B';
+    document.getElementById('status').textContent = 'Processing...';
+  }
+}
+</script>
+"""
+
 
 def stt(audio_bytes):
     """Speech-to-Text using Sarvam Saarika v2."""
@@ -76,8 +140,7 @@ def stt(audio_bytes):
         if r.status_code != 200:
             st.error(f"STT Error {r.status_code}: {r.text[:300]}")
             return ""
-        result = r.json()
-        return result.get("transcript", "")
+        return r.json().get("transcript", "")
     except Exception as e:
         st.error(f"STT Exception: {e}")
         return ""
@@ -89,7 +152,6 @@ def tts(text, lang_code):
         return None
     try:
         tts_lang = lang_code if lang_code in TTS_SUPPORTED else "en-IN"
-        text_trimmed = text[:1500]
         r = requests.post(
             "https://api.sarvam.ai/text-to-speech",
             headers={
@@ -97,7 +159,7 @@ def tts(text, lang_code):
                 "Content-Type": "application/json"
             },
             json={
-                "text": text_trimmed,
+                "text": text[:1500],
                 "target_language_code": tts_lang,
                 "speaker": "anushka",
                 "model": "bulbul:v2",
@@ -109,9 +171,7 @@ def tts(text, lang_code):
             st.warning(f"TTS Error {r.status_code}: {r.text[:300]}")
             return None
         audios = r.json().get("audios", [])
-        if audios:
-            return base64.b64decode(audios[0])
-        return None
+        return base64.b64decode(audios[0]) if audios else None
     except Exception as e:
         st.warning(f"TTS Exception: {e}")
         return None
@@ -133,12 +193,7 @@ def chat(user_msg, history):
                 "Authorization": f"Bearer {SARVAM_API_KEY}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": "sarvam-m",
-                "messages": msgs,
-                "temperature": 0.7,
-                "max_tokens": 512
-            },
+            json={"model": "sarvam-m", "messages": msgs, "temperature": 0.7, "max_tokens": 512},
             timeout=30
         )
         r.raise_for_status()
@@ -150,8 +205,6 @@ def chat(user_msg, history):
 # ======== SESSION STATE INIT ========
 if "history" not in st.session_state:
     st.session_state.history = []
-if "last_audio_id" not in st.session_state:
-    st.session_state.last_audio_id = None
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 
@@ -169,15 +222,10 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🎤 Voice Input")
-    st.caption("▶️ Click mic to start recording | ⏹️ Click again to stop")
+    st.caption("▶️ Click to start | ⏹️ Click again to stop")
 
-    audio = mic_recorder(
-        start_prompt="🎤 Start Speaking",
-        stop_prompt="⏹️ Stop Recording",
-        just_once=True,
-        use_container_width=True,
-        key="mic"
-    )
+    # Render the JS audio recorder
+    audio_b64 = components.html(AUDIO_RECORDER_HTML, height=100)
 
     st.divider()
     st.markdown("🚨 **Emergency**")
@@ -185,27 +233,8 @@ with st.sidebar:
     st.divider()
     if st.button("🗑️ Clear Chat"):
         st.session_state.history = []
-        st.session_state.last_audio_id = None
         st.session_state.pending_input = None
         st.rerun()
-
-
-# ======== PROCESS NEW VOICE RECORDING ========
-if audio is not None:
-    audio_id = audio.get("id")
-    wav_bytes = audio.get("bytes", b"")
-    # Only process if this is a genuinely new recording
-    if audio_id != st.session_state.last_audio_id and len(wav_bytes) > 1000:
-        st.session_state.last_audio_id = audio_id
-        with st.spinner("🎧 Transcribing your voice..."):
-            transcript = stt(wav_bytes)
-        if transcript and transcript.strip():
-            st.session_state.pending_input = transcript.strip()
-            st.toast(f"🎤 Heard: {transcript[:80]}")
-        else:
-            st.warning("🔇 Could not transcribe. Please speak clearly and try again.")
-    elif audio_id != st.session_state.last_audio_id and len(wav_bytes) <= 1000:
-        st.warning("🔇 Recording too short. Please hold the mic and speak for at least 1 second.")
 
 
 # ======== MAIN ========
@@ -221,12 +250,8 @@ for m in st.session_state.history:
         if m.get("audio"):
             st.audio(m["audio"], format="audio/wav")
 
-# ---- Determine input: voice takes priority over text ----
-text_inp = st.chat_input(f"Ask in {lang}...")
-final_inp = st.session_state.pending_input or text_inp
-
-if st.session_state.pending_input:
-    st.session_state.pending_input = None
+# ---- Text input ----
+final_inp = st.chat_input(f"Ask in {lang}...")
 
 if final_inp:
     with st.chat_message("user"):
