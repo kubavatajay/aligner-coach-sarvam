@@ -84,7 +84,7 @@ def stt(audio_bytes):
             "file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")
         }
         data = {
-            "model": "saarika:v2",
+            "model": "saarika:v2.5",
             "language_code": "unknown"
         }
         r = requests.post(
