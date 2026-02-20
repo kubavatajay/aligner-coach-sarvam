@@ -25,7 +25,6 @@ LANGUAGES = {
 SYSTEM_PROMPT = """You are the Aligner Coach AI, created by Dr. Ajay Kubavat (MDS Orthodontics),
 Founder of Sure Align Orthodontix n Dentistry, Ahmedabad, Gujarat.
 You are a friendly, empathetic expert aligner-treatment assistant for patients.
-
 DETECT the patient language automatically and REPLY in the SAME language.
 You support all 22 official Indian languages.
 
@@ -54,9 +53,8 @@ ALWAYS end every response with:
 """
 
 # ---- Sarvam AI Functions ----
-
 def stt(audio_bytes):
-    """Voice to Text using Sarvam Saarika v2 - correct endpoint (no /v1/)"""
+    """Voice to Text using Sarvam Saarika v2"""
     try:
         files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
         r = requests.post(
@@ -73,10 +71,15 @@ def stt(audio_bytes):
         return ""
 
 def tts(text, lang_code):
-    """Text to Speech using Sarvam Bulbul v1 - correct endpoint (no /v1/)"""
+    """Text to Speech using Sarvam Bulbul v2"""
     try:
-        # Trim text to 500 chars max (TTS limit)
-        text = text[:500]
+        # Trim text to 1500 chars max (bulbul:v2 limit)
+        text = text[:1500]
+        # Only supported language codes for bulbul:v2 TTS
+        supported_tts = ["hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN",
+                         "od-IN", "pa-IN", "ta-IN", "te-IN", "en-IN", "gu-IN"]
+        if lang_code not in supported_tts:
+            lang_code = "en-IN"
         r = requests.post(
             "https://api.sarvam.ai/text-to-speech",
             headers={
@@ -84,10 +87,10 @@ def tts(text, lang_code):
                 "Content-Type": "application/json"
             },
             json={
-                "inputs": [text],
+                "text": text,
                 "target_language_code": lang_code,
-                "speaker": "meera",
-                "model": "bulbul:v1",
+                "speaker": "anushka",
+                "model": "bulbul:v2",
                 "enable_preprocessing": True
             },
             timeout=30
@@ -98,6 +101,7 @@ def tts(text, lang_code):
             return base64.b64decode(audios[0])
         return None
     except Exception as e:
+        st.warning(f"Audio generation note: {e}")
         return None
 
 def chat(user_msg, history):
@@ -139,7 +143,7 @@ with st.sidebar:
         icon_size="2x"
     )
     st.divider()
-    st.markdown("**🚨 Emergency**")
+    st.markdown("🚨 **Emergency**")
     st.markdown("[WhatsApp Dr. Ajay](https://wa.me/916358822642)")
     st.divider()
     if st.button("🗑️ Clear Chat"):
@@ -157,9 +161,9 @@ if "history" not in st.session_state:
 if recorded_audio and len(recorded_audio) > 1000:
     with st.spinner("🎧 Transcribing your voice..."):
         v_text = stt(recorded_audio)
-        if v_text and v_text.strip():
-            st.session_state.v_input = v_text.strip()
-            st.toast(f"🎤 Heard: {v_text[:60]}")
+    if v_text and v_text.strip():
+        st.session_state.v_input = v_text.strip()
+        st.toast(f"🎤 Heard: {v_text[:60]}")
 
 # Display chat history
 for m in st.session_state.history:
