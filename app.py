@@ -6,7 +6,51 @@ from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(page_title="Aligner Coach | Dr. Ajay Kubavat", page_icon="🦷", layout="centered", initial_sidebar_state="expanded")
 
-st.markdown("""<style>.stApp { background-color: #f8f9fa; color: #212529; } [data-testid='stSidebar'] { background-color: #ffffff !important; border-right: 1px solid #dee2e6; } .stSidebar [data-testid='stMarkdownContainer'] p, .stSidebar [data-testid='stMarkdownContainer'] h1, .stSidebar [data-testid='stMarkdownContainer'] h2, .stSidebar [data-testid='stMarkdownContainer'] h3 { color: #212529 !important; } .stChatMessage { background-color: white !important; border-radius: 15px !important; border: 1px solid #e9ecef !important; color: #212529 !important; padding: 15px !important; margin-bottom: 15px !important; } .stButton>button { width: 100%; border-radius: 25px; background-color: #007bff; color: white; border: none; font-weight: bold; } .stButton>button:hover { background-color: #0056b3; }</style>""", unsafe_allow_html=True)
+st.markdown("""<style>
+.stApp { 
+    background-color: #ffffff; 
+    color: #000000; 
+} 
+[data-testid='stSidebar'] { 
+    background-color: #f1f3f5 !important; 
+    border-right: 2px solid #000000; 
+} 
+.stSidebar [data-testid='stMarkdownContainer'] p, 
+.stSidebar [data-testid='stMarkdownContainer'] h1, 
+.stSidebar [data-testid='stMarkdownContainer'] h2, 
+.stSidebar [data-testid='stMarkdownContainer'] h3,
+.stSidebar [data-testid='stWidgetLabel'] p { 
+    color: #000000 !important; 
+    font-weight: 600 !important;
+} 
+.stChatMessage { 
+    background-color: #ffffff !important; 
+    border-radius: 10px !important; 
+    border: 2px solid #000000 !important; 
+    color: #000000 !important; 
+    padding: 15px !important; 
+    margin-bottom: 15px !important; 
+} 
+.stChatMessage [data-testid='stMarkdownContainer'] p {
+    color: #000000 !important;
+}
+.stButton>button { 
+    width: 100%; 
+    border-radius: 10px; 
+    background-color: #000000; 
+    color: #ffffff; 
+    border: 2px solid #000000; 
+    font-weight: bold; 
+} 
+.stButton>button:hover { 
+    background-color: #333333; 
+    color: #ffffff;
+}
+.stTextInput input, .stSelectbox div[data-baseweb="select"] {
+    color: #000000 !important;
+    border: 2px solid #000000 !important;
+}
+</style>""", unsafe_allow_html=True)
 
 SARVAM_API_KEY = st.secrets.get("SARVAM_API_KEY", "")
 LANGUAGES = {"Auto Detect": "unknown", "English": "en-IN", "Hindi": "hi-IN", "Gujarati": "gu-IN", "Bengali": "bn-IN", "Tamil": "ta-IN", "Telugu": "te-IN", "Kannada": "kn-IN", "Malayalam": "ml-IN", "Marathi": "mr-IN", "Punjabi": "pa-IN", "Odia": "od-IN", "Assamese": "as-IN", "Maithili": "mai-IN", "Konkani": "kok-IN", "Dogri": "doi-IN", "Kashmiri": "ks-IN", "Manipuri": "mni-IN", "Nepali": "ne-IN", "Sanskrit": "sa-IN", "Santali": "sat-IN", "Sindhi": "sd-IN", "Urdu": "ur-IN"}
