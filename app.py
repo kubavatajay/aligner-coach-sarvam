@@ -64,7 +64,7 @@ def stt(audio_bytes):
         return ""
     try:
         files = {"file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")}
-        data = {"model": "saarika:v2", "language_code": "unknown"}
+                data = {"model": "saarika:v2.5", "language_code": "unknown"}
         r = requests.post(
             "https://api.sarvam.ai/speech-to-text",
             headers={"api-subscription-key": SARVAM_API_KEY},
