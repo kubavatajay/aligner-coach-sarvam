@@ -54,28 +54,18 @@ Allergic reaction (swelling, rash).
 Multiple attachments fallen off.
 Contact: Dr. Ajay Kubavat | WhatsApp: +916358822642
 Clinic: Sure Align Orthodontix n Dentistry, Ahmedabad
-
-ALWAYS end every response with:
-'For any concerns, WhatsApp Dr. Ajay Kubavat: +916358822642'
+ALWAYS end every response with: 'For any concerns, WhatsApp Dr. Ajay Kubavat: +916358822642'
 """
 
 
 def stt(audio_bytes):
-    """Speech-to-Text using Sarvam Saarika v2.
-    audio_bytes: raw WAV bytes from mic_recorder['bytes'].
-    Returns transcript string.
-    """
+    """Speech-to-Text using Sarvam Saarika v2."""
     if not SARVAM_API_KEY:
         st.error("Sarvam API key not configured.")
         return ""
     try:
-        files = {
-            "file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")
-        }
-        data = {
-            "model": "saarika:v2",
-            "language_code": "unknown"
-        }
+        files = {"file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")}
+        data = {"model": "saarika:v2", "language_code": "unknown"}
         r = requests.post(
             "https://api.sarvam.ai/speech-to-text",
             headers={"api-subscription-key": SARVAM_API_KEY},
@@ -86,16 +76,15 @@ def stt(audio_bytes):
         if r.status_code != 200:
             st.error(f"STT Error {r.status_code}: {r.text[:300]}")
             return ""
-        return r.json().get("transcript", "")
+        result = r.json()
+        return result.get("transcript", "")
     except Exception as e:
-        st.error(f"STT Error: {e}")
+        st.error(f"STT Exception: {e}")
         return ""
 
 
 def tts(text, lang_code):
-    """Text-to-Speech using Sarvam Bulbul v2.
-    Returns WAV bytes or None.
-    """
+    """Text-to-Speech using Sarvam Bulbul v2. Returns WAV bytes or None."""
     if not SARVAM_API_KEY:
         return None
     try:
@@ -124,7 +113,7 @@ def tts(text, lang_code):
             return base64.b64decode(audios[0])
         return None
     except Exception as e:
-        st.warning(f"TTS Error: {e}")
+        st.warning(f"TTS Exception: {e}")
         return None
 
 
@@ -158,6 +147,15 @@ def chat(user_msg, history):
         return f"Chat Error: {str(e)}"
 
 
+# ======== SESSION STATE INIT ========
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "last_audio_id" not in st.session_state:
+    st.session_state.last_audio_id = None
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
+
+
 # ======== SIDEBAR ========
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/tooth.png", width=80)
@@ -168,17 +166,15 @@ with st.sidebar:
 
     lang = st.selectbox("🌐 Language / भाषा", list(LANGUAGES.keys()))
     lang_code = LANGUAGES[lang]
-
     st.divider()
-    st.markdown("### 🎤 Voice Input")
-    st.caption("▶️ Click to start | ⏹️ Click to stop | Auto-transcribes")
 
-    # mic_recorder: works reliably on Streamlit Cloud
-    # Returns dict with 'bytes' (WAV) and 'id' (unique per recording)
+    st.markdown("### 🎤 Voice Input")
+    st.caption("▶️ Click mic to start recording | ⏹️ Click again to stop")
+
     audio = mic_recorder(
         start_prompt="🎤 Start Speaking",
         stop_prompt="⏹️ Stop Recording",
-        just_once=False,
+        just_once=True,
         use_container_width=True,
         key="mic"
     )
@@ -187,39 +183,34 @@ with st.sidebar:
     st.markdown("🚨 **Emergency**")
     st.markdown("[WhatsApp Dr. Ajay](https://wa.me/916358822642)")
     st.divider()
-
     if st.button("🗑️ Clear Chat"):
         st.session_state.history = []
-        st.session_state["last_audio_id"] = None
+        st.session_state.last_audio_id = None
+        st.session_state.pending_input = None
         st.rerun()
+
+
+# ======== PROCESS NEW VOICE RECORDING ========
+if audio is not None:
+    audio_id = audio.get("id")
+    wav_bytes = audio.get("bytes", b"")
+    # Only process if this is a genuinely new recording
+    if audio_id != st.session_state.last_audio_id and len(wav_bytes) > 1000:
+        st.session_state.last_audio_id = audio_id
+        with st.spinner("🎧 Transcribing your voice..."):
+            transcript = stt(wav_bytes)
+        if transcript and transcript.strip():
+            st.session_state.pending_input = transcript.strip()
+            st.toast(f"🎤 Heard: {transcript[:80]}")
+        else:
+            st.warning("🔇 Could not transcribe. Please speak clearly and try again.")
+    elif audio_id != st.session_state.last_audio_id and len(wav_bytes) <= 1000:
+        st.warning("🔇 Recording too short. Please hold the mic and speak for at least 1 second.")
 
 
 # ======== MAIN ========
 st.title("🦷 Aligner Coach")
 st.caption("Dr. Ajay Kubavat | Sure Align Orthodontix n Dentistry | Powered by Sarvam.ai")
-
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "last_audio_id" not in st.session_state:
-    st.session_state.last_audio_id = None
-
-# ---- Process new voice recording ----
-if audio is not None:
-    audio_id = audio.get("id")
-    # Only process if this is a new recording (id changes each time)
-    if audio_id != st.session_state.last_audio_id:
-        st.session_state.last_audio_id = audio_id
-        wav_bytes = audio["bytes"]
-        if len(wav_bytes) > 1000:  # ignore empty/noise recordings
-            with st.spinner("🎧 Transcribing your voice..."):
-                transcript = stt(wav_bytes)
-            if transcript and transcript.strip():
-                st.session_state.v_input = transcript.strip()
-                st.toast(f"🎤 Heard: {transcript[:80]}")
-            else:
-                st.warning("🔇 Could not transcribe. Please speak clearly and try again.")
-        else:
-            st.warning("🔇 Recording too short. Please hold and speak for at least 1 second.")
 
 # ---- Display chat history ----
 for m in st.session_state.history:
@@ -230,28 +221,27 @@ for m in st.session_state.history:
         if m.get("audio"):
             st.audio(m["audio"], format="audio/wav")
 
-# ---- Text or voice input ----
-inp = st.chat_input(f"Ask in {lang}...")
-if st.session_state.get("v_input"):
-    inp = st.session_state.pop("v_input")
+# ---- Determine input: voice takes priority over text ----
+text_inp = st.chat_input(f"Ask in {lang}...")
+final_inp = st.session_state.pending_input or text_inp
 
-if inp:
+if st.session_state.pending_input:
+    st.session_state.pending_input = None
+
+if final_inp:
     with st.chat_message("user"):
-        st.write(inp)
-
+        st.write(final_inp)
     with st.spinner("🦷 Dr. Ajay's AI is thinking..."):
-        rep = chat(inp, st.session_state.history)
-
+        rep = chat(final_inp, st.session_state.history)
+    audio_out = None
     with st.spinner("🔊 Generating audio response..."):
         audio_out = tts(rep, lang_code)
-
     with st.chat_message("assistant", avatar="🦷"):
         st.write(rep)
         if audio_out:
             st.audio(audio_out, format="audio/wav")
-
     st.session_state.history.append({
-        "user": inp,
+        "user": final_inp,
         "bot": rep,
         "audio": audio_out
     })
