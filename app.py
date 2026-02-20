@@ -22,7 +22,6 @@ LANGUAGES = {
     "Sanskrit": "sa-IN", "Santali": "sat-IN", "Sindhi": "sd-IN", "Urdu": "ur-IN"
 }
 
-# Sarvam TTS (bulbul:v2) supports only these 11 language codes
 TTS_SUPPORTED = [
     "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN",
     "od-IN", "pa-IN", "ta-IN", "te-IN", "en-IN", "gu-IN"
@@ -58,13 +57,12 @@ ALWAYS end every response with: 'For any concerns, WhatsApp Dr. Ajay Kubavat: +9
 
 
 def stt(audio_bytes):
-    """Speech-to-Text using Sarvam Saarika v2."""
     if not SARVAM_API_KEY:
         st.error("Sarvam API key not configured.")
         return ""
     try:
         files = {"file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")}
-                data = {"model": "saarika:v2.5", "language_code": "unknown"}
+        data = {"model": "saarika:v2.5", "language_code": "unknown"}
         r = requests.post(
             "https://api.sarvam.ai/speech-to-text",
             headers={"api-subscription-key": SARVAM_API_KEY},
@@ -82,7 +80,6 @@ def stt(audio_bytes):
 
 
 def tts(text, lang_code):
-    """Text-to-Speech using Sarvam Bulbul v2. Returns WAV bytes or None."""
     if not SARVAM_API_KEY:
         return None
     try:
@@ -113,7 +110,6 @@ def tts(text, lang_code):
 
 
 def chat(user_msg, history):
-    """Chat using Sarvam-M."""
     if not SARVAM_API_KEY:
         return "API key not configured."
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -137,7 +133,6 @@ def chat(user_msg, history):
         return f"Chat Error: {str(e)}"
 
 
-# ======== SESSION STATE INIT ========
 if "history" not in st.session_state:
     st.session_state.history = []
 if "last_audio_hash" not in st.session_state:
@@ -146,7 +141,6 @@ if "pending_voice_input" not in st.session_state:
     st.session_state.pending_voice_input = None
 
 
-# ======== SIDEBAR ========
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/tooth.png", width=80)
     st.markdown("## 🦷 Aligner Coach")
@@ -159,9 +153,8 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🎤 Voice Input")
-    st.caption("Record your voice - it will be auto-transcribed via Sarvam AI")
+    st.caption("Record your voice - auto-transcribed via Sarvam AI")
 
-    # st.audio_input: built-in Streamlit widget (>= 1.41), no extra packages
     audio_input = st.audio_input("🎤 Click to record your question", key="voice_rec")
 
     if audio_input is not None:
@@ -188,11 +181,9 @@ with st.sidebar:
         st.rerun()
 
 
-# ======== MAIN ========
 st.title("🦷 Aligner Coach")
 st.caption("Dr. Ajay Kubavat | Sure Align Orthodontix n Dentistry | Powered by Sarvam.ai")
 
-# ---- Display chat history ----
 for m in st.session_state.history:
     with st.chat_message("user"):
         st.write(m["user"])
@@ -201,7 +192,6 @@ for m in st.session_state.history:
         if m.get("audio"):
             st.audio(m["audio"], format="audio/wav")
 
-# ---- Determine final input (voice takes priority) ----
 text_inp = st.chat_input(f"Ask in {lang}...")
 final_inp = st.session_state.pending_voice_input or text_inp
 
