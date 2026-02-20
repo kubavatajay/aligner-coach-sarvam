@@ -85,7 +85,7 @@ def stt(audio_bytes):
         }
         data = {
             "model": "saarika:v2",
-            "language_code": "unknown"  # Auto-detection enabled
+            "language_code": "unknown"
         }
         r = requests.post(
             "https://api.sarvam.ai/speech-to-text",
@@ -109,7 +109,6 @@ def tts(text, lang_code):
     if not SARVAM_API_KEY:
         return None
     try:
-        # Fallback to English if language not supported for TTS
         tts_lang = lang_code if lang_code in TTS_SUPPORTED else "en-IN"
         text_trimmed = text[:1500]
         r = requests.post(
@@ -143,11 +142,10 @@ def chat(user_msg, history, selected_lang):
     if not SARVAM_API_KEY:
         return "API key not configured."
     
-    # Prepend language instruction if a specific language is selected
     lang_instr = ""
     if selected_lang != "Auto Detect":
-        lang_instr = f"
-
+        lang_instr = f"\
+\
 IMPORTANT: The user has selected {selected_lang}. Please reply exclusively in {selected_lang}."
         
     msgs = [{"role": "system", "content": SYSTEM_PROMPT + lang_instr}]
@@ -227,7 +225,6 @@ if audio is not None:
                 transcript, detected_lang = stt(wav_bytes)
                 if transcript and transcript.strip():
                     st.session_state.v_input = transcript.strip()
-                    # Update active language code if auto-detect is on
                     if lang == "Auto Detect":
                         st.session_state.detected_lang_code = detected_lang
                     st.toast(f"🎤 Heard: {transcript[:80]}")
@@ -259,9 +256,6 @@ if inp:
     with st.spinner("🦷 Dr. Ajay's AI is thinking..."):
         rep = chat(inp, st.session_state.history, lang)
     
-    # Determine language for TTS
-    # If explicit lang selected, use that code. 
-    # If Auto Detect, ideally we'd detect from the 'rep', but for now we'll use English or the voice-detected lang if available
     target_tts_code = lang_code
     if lang == "Auto Detect":
         target_tts_code = st.session_state.get("detected_lang_code", "en-IN")
