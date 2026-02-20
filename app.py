@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import base64
 import io
+from streamlit_mic_recorder import mic_recorder
 
 st.set_page_config(
     page_title="Aligner Coach | Dr. Ajay Kubavat",
@@ -22,7 +23,7 @@ LANGUAGES = {
     "Sanskrit": "sa-IN", "Santali": "sat-IN", "Sindhi": "sd-IN", "Urdu": "ur-IN"
 }
 
-# TTS only supports these 11 language codes
+# Sarvam TTS (bulbul:v2) supports only these 11 language codes
 TTS_SUPPORTED = [
     "hi-IN", "bn-IN", "kn-IN", "ml-IN", "mr-IN",
     "od-IN", "pa-IN", "ta-IN", "te-IN", "en-IN", "gu-IN"
@@ -59,16 +60,15 @@ ALWAYS end every response with:
 """
 
 
-def stt(audio_file):
+def stt(audio_bytes):
     """Speech-to-Text using Sarvam Saarika v2.
-    audio_file: file-like object (from st.audio_input) with .read() method.
+    audio_bytes: raw WAV bytes from mic_recorder['bytes'].
     Returns transcript string.
     """
     if not SARVAM_API_KEY:
-        st.error("Sarvam API key not set.")
+        st.error("Sarvam API key not configured.")
         return ""
     try:
-        audio_bytes = audio_file.read()
         files = {
             "file": ("recording.wav", io.BytesIO(audio_bytes), "audio/wav")
         }
@@ -86,8 +86,7 @@ def stt(audio_file):
         if r.status_code != 200:
             st.error(f"STT Error {r.status_code}: {r.text[:300]}")
             return ""
-        result = r.json()
-        return result.get("transcript", "")
+        return r.json().get("transcript", "")
     except Exception as e:
         st.error(f"STT Error: {e}")
         return ""
@@ -100,24 +99,21 @@ def tts(text, lang_code):
     if not SARVAM_API_KEY:
         return None
     try:
-        # Fallback to English for languages not supported by TTS
         tts_lang = lang_code if lang_code in TTS_SUPPORTED else "en-IN"
-        # bulbul:v2 max 1500 chars
         text_trimmed = text[:1500]
-        payload = {
-            "text": text_trimmed,
-            "target_language_code": tts_lang,
-            "speaker": "anushka",
-            "model": "bulbul:v2",
-            "enable_preprocessing": True
-        }
         r = requests.post(
             "https://api.sarvam.ai/text-to-speech",
             headers={
                 "api-subscription-key": SARVAM_API_KEY,
                 "Content-Type": "application/json"
             },
-            json=payload,
+            json={
+                "text": text_trimmed,
+                "target_language_code": tts_lang,
+                "speaker": "anushka",
+                "model": "bulbul:v2",
+                "enable_preprocessing": True
+            },
             timeout=30
         )
         if r.status_code != 200:
@@ -133,9 +129,9 @@ def tts(text, lang_code):
 
 
 def chat(user_msg, history):
-    """Chat completion using Sarvam-M."""
+    """Chat using Sarvam-M."""
     if not SARVAM_API_KEY:
-        return "API key not configured. Please set SARVAM_API_KEY in Streamlit secrets."
+        return "API key not configured."
     msgs = [{"role": "system", "content": SYSTEM_PROMPT}]
     for h in history[-6:]:
         msgs.append({"role": "user", "content": h["user"]})
@@ -175,12 +171,16 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### 🎤 Voice Input")
-    st.caption("Record your question below, then it will auto-transcribe")
+    st.caption("▶️ Click to start | ⏹️ Click to stop | Auto-transcribes")
 
-    # Built-in Streamlit audio input (no extra package needed)
-    audio_input = st.audio_input(
-        label="Speak your question",
-        key="voice_input"
+    # mic_recorder: works reliably on Streamlit Cloud
+    # Returns dict with 'bytes' (WAV) and 'id' (unique per recording)
+    audio = mic_recorder(
+        start_prompt="🎤 Start Speaking",
+        stop_prompt="⏹️ Stop Recording",
+        just_once=False,
+        use_container_width=True,
+        key="mic"
     )
 
     st.divider()
@@ -203,19 +203,23 @@ if "history" not in st.session_state:
 if "last_audio_id" not in st.session_state:
     st.session_state.last_audio_id = None
 
-# ---- Process voice input ----
-if audio_input is not None:
-    # Use file ID to avoid re-processing same recording on re-runs
-    audio_id = id(audio_input)
+# ---- Process new voice recording ----
+if audio is not None:
+    audio_id = audio.get("id")
+    # Only process if this is a new recording (id changes each time)
     if audio_id != st.session_state.last_audio_id:
         st.session_state.last_audio_id = audio_id
-        with st.spinner("🎧 Transcribing your voice..."):
-            transcript = stt(audio_input)
-        if transcript and transcript.strip():
-            st.session_state.v_input = transcript.strip()
-            st.toast(f"🎤 Heard: {transcript[:80]}")
+        wav_bytes = audio["bytes"]
+        if len(wav_bytes) > 1000:  # ignore empty/noise recordings
+            with st.spinner("🎧 Transcribing your voice..."):
+                transcript = stt(wav_bytes)
+            if transcript and transcript.strip():
+                st.session_state.v_input = transcript.strip()
+                st.toast(f"🎤 Heard: {transcript[:80]}")
+            else:
+                st.warning("🔇 Could not transcribe. Please speak clearly and try again.")
         else:
-            st.warning("🔇 Could not transcribe. Please speak clearly and try again.")
+            st.warning("🔇 Recording too short. Please hold and speak for at least 1 second.")
 
 # ---- Display chat history ----
 for m in st.session_state.history:
